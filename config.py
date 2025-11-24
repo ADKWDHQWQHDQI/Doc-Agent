@@ -49,6 +49,10 @@ class Config:
     AZURE_AI_PROJECT_ENDPOINT: Optional[str] = os.getenv("AZURE_AI_PROJECT_ENDPOINT")
     DEPLOYMENT_NAME: str = os.getenv("DEPLOYMENT_NAME", "gpt-4o-mini")
     
+    # Legacy Azure OpenAI Settings (for backward compatibility)
+    AZURE_OPENAI_ENDPOINT: Optional[str] = os.getenv("AZURE_OPENAI_ENDPOINT")
+    AZURE_OPENAI_KEY: Optional[str] = os.getenv("AZURE_OPENAI_KEY")
+    
     # Azure Project Metadata (Required for proper agent registration per MAF docs)
     AZURE_SUBSCRIPTION_ID: Optional[str] = os.getenv("AZURE_SUBSCRIPTION_ID")
     AZURE_RESOURCE_GROUP: Optional[str] = os.getenv("AZURE_RESOURCE_GROUP")
@@ -89,13 +93,16 @@ class Config:
         """Determine which configuration mode is active.
         
         Returns:
-            'foundry' - Azure AI Foundry
-            'none' - No valid configuration
+            'foundry_maf' - Azure AI Foundry with Microsoft Agent Framework
+            'openai_direct' - Direct Azure OpenAI (legacy)
+            'mock' - Mock mode for testing/development
         """
         if cls.AZURE_AI_PROJECT_ENDPOINT:
-            return 'foundry'
+            return 'foundry_maf'  # Microsoft Agent Framework
+        elif cls.AZURE_OPENAI_ENDPOINT:
+            return 'openai_direct'  # Legacy support
         else:
-            return 'none'
+            return 'mock'  # Fallback for offline development
     
     @classmethod
     def is_foundry_mode(cls) -> bool:
@@ -121,15 +128,18 @@ class Config:
         return True
     
     @classmethod
-    def validate_agent_config(cls) -> bool:
+    def validate_agent_config(cls, strict: bool = True) -> bool:
         """Validate configuration for Microsoft Agent Framework.
         
+        Args:
+            strict: If True, raise errors. If False, return False on issues (graceful degradation)
+        
         Returns:
-            True if configuration is valid
+            True if configuration is valid, False if invalid (when strict=False)
             
         Raises:
-            ImportError: If SDK not available
-            ValueError: If AZURE_AI_PROJECT_ENDPOINT not configured
+            ImportError: If SDK not available (only when strict=True)
+            ValueError: If AZURE_AI_PROJECT_ENDPOINT not configured (only when strict=True)
         """
         # Check SDK availability
         if not AGENT_SDK_AVAILABLE:
@@ -137,14 +147,27 @@ class Config:
             if AGENT_SDK_ERROR:
                 error_msg += f"\nError: {AGENT_SDK_ERROR}"
             error_msg += "\nInstall with: pip install agent-framework-azure-ai --pre"
-            raise ImportError(error_msg)
+            
+            if strict:
+                raise ImportError(error_msg)
+            else:
+                print(f"⚠️  Warning: {error_msg}")
+                print("   Using mock mode for offline development.")
+                return False
         
         # Check Foundry configuration
         if not cls.AZURE_AI_PROJECT_ENDPOINT:
-            raise ValueError(
+            error_msg = (
                 "AZURE_AI_PROJECT_ENDPOINT not configured. "
                 "Set this environment variable to your Azure AI Foundry project endpoint."
             )
+            
+            if strict:
+                raise ValueError(error_msg)
+            else:
+                print(f"⚠️  Warning: {error_msg}")
+                print("   Using mock mode for offline development.")
+                return False
         
         return True
     
@@ -191,6 +214,31 @@ class Config:
         )
         
         return diagnostics
+    
+    @classmethod
+    def get_project_client(cls, strict: bool = False):
+        """Get Azure AI Agent client with automatic mock fallback.
+        
+        Args:
+            strict: If True, raise errors on missing SDK. If False, return mock client.
+        
+        Returns:
+            AzureAIAgentClient instance or mock client
+        """
+        # Validate configuration
+        if not cls.validate_agent_config(strict=strict):
+            return cls._get_mock_client()
+        
+        # Return real client if available
+        if AGENT_SDK_AVAILABLE and AzureAIAgentClient:
+            from azure.identity.aio import DefaultAzureCredential
+            return AzureAIAgentClient(
+                project_endpoint=cls.AZURE_AI_PROJECT_ENDPOINT,
+                model_deployment_name=cls.DEPLOYMENT_NAME,
+                async_credential=DefaultAzureCredential()
+            )
+        else:
+            return cls._get_mock_client()
     
     @classmethod
     def _get_mock_client(cls):
