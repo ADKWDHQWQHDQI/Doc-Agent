@@ -79,10 +79,35 @@ class DelegationCoordinator:
             orchestrator: DocumentationOrchestrator with initialized agents
         """
         self.orchestrator = orchestrator
+        # Dynamic workflow phases - can be customized per request
+        self.workflow_phases = [
+            {'name': 'dispatch', 'agents': ['dispatcher'], 'parallel': False},
+            {'name': 'research', 'agents': ['analyst', 'researcher'], 'parallel': True},
+            {'name': 'synthesis', 'agents': ['writer'], 'parallel': False},
+            {'name': 'review', 'agents': ['security_reviewer', 'editor'], 'parallel': False}
+        ]
         print("✅ Delegation Coordinator initialized")
         print("   Mode: MAF Native Delegation")
         print("   Agents: 6 specialized agents with connected_agents graph")
         print("   Capabilities: Parallel execution, state sharing, dynamic routing\n")
+    
+    async def _delegate_via_maf(self, from_agent, to_agent, message: str) -> str:
+        """Delegate work using MAF's native delegation if available, fallback to direct call.
+        
+        This method leverages the delegate_to() method in BaseAgent which:
+        1. Tries MAF's agent.delegate() if connected_agents is configured
+        2. Falls back to direct execute_async() for compatibility
+        
+        Args:
+            from_agent: Source agent (BaseAgent instance)
+            to_agent: Target agent (BaseAgent instance)
+            message: Task/message for the target agent
+            
+        Returns:
+            Response from target agent
+        """
+        # Use BaseAgent's delegate_to which handles MAF delegation + fallback
+        return await from_agent.delegate_to(to_agent.name, message, {})
     
     async def coordinate(self, request: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """Coordinate multi-agent collaboration to generate documentation.
@@ -148,18 +173,20 @@ Respond in JSON format with: document_type, workflow, needs_clarification"""
         print("   → Analyst: Extracting requirements")
         print("   → Researcher: Analyzing code (if provided)")
         
-        # Create parallel tasks
-        analyst_task = self.orchestrator.analyst.execute_async(
-            f"Extract and structure requirements from:\n{request}",
-            {}
+        # Create parallel tasks using MAF delegation
+        analyst_task = self._delegate_via_maf(
+            self.orchestrator.dispatcher,
+            self.orchestrator.analyst,
+            f"Extract and structure requirements from:\n{request}"
         )
         
         # Only run researcher if code is provided
         researcher_task = None
         if context.get('code_directory') or context.get('input_files'):
-            researcher_task = self.orchestrator.researcher.execute_async(
-                f"Analyze code for documentation:\nRequest: {request}\nDirectory: {context.get('code_directory', 'N/A')}",
-                {}
+            researcher_task = self._delegate_via_maf(
+                self.orchestrator.dispatcher,
+                self.orchestrator.researcher,
+                f"Analyze code for documentation:\nRequest: {request}\nDirectory: {context.get('code_directory', 'N/A')}"
             )
         
         # Execute in parallel using asyncio.gather
@@ -190,7 +217,11 @@ Respond in JSON format with: document_type, workflow, needs_clarification"""
 
 Generate complete, well-structured documentation in Markdown format."""
         
-        document = await self.orchestrator.writer.execute_async(writer_prompt, {})
+        document = await self._delegate_via_maf(
+            self.orchestrator.dispatcher,
+            self.orchestrator.writer,
+            writer_prompt
+        )
         print("   ✓ Document generated\n")
         
         # PHASE 4: Sequential Review & Polish
@@ -207,9 +238,10 @@ Provide:
 2. Compliance requirements
 3. Recommended changes"""
         
-        security_result = await self.orchestrator.security_reviewer.execute_async(
-            security_prompt,
-            {}
+        security_result = await self._delegate_via_maf(
+            self.orchestrator.writer,
+            self.orchestrator.security_reviewer,
+            security_prompt
         )
         
         # Editor polish (sequential - final step)
@@ -223,7 +255,11 @@ Security Feedback:
 
 Apply professional formatting, fix any issues, and ensure consistency."""
         
-        final_document = await self.orchestrator.editor.execute_async(editor_prompt, {})
+        final_document = await self._delegate_via_maf(
+            self.orchestrator.security_reviewer,
+            self.orchestrator.editor,
+            editor_prompt
+        )
         print("   ✓ Review & polish complete\n")
         
         # Save document
