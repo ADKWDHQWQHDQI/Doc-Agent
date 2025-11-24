@@ -83,6 +83,12 @@ Examples:
     )
     
     parser.add_argument(
+        '--debug', '-d',
+        action='store_true',
+        help='Enable debug output with full stack traces'
+    )
+    
+    parser.add_argument(
         '--no-exit',
         action='store_true',
         help='Raise exceptions instead of sys.exit() (useful for testing/library use)'
@@ -256,9 +262,9 @@ Examples:
         elif not document_content and not args.quiet:
             print("\n⚠️  Warning: No document content in result")
         
-        # Save workflow log if available
+        # Save workflow log if available (safe access to prevent KeyError)
         workflow_log = result.get('log', []) if isinstance(result, dict) else []
-        if workflow_log and not args.quiet:
+        if workflow_log:
             try:
                 log_path = Config.OUTPUT_DIR / f"workflow_log_{orchestrator._get_timestamp()}.txt"
                 with open(log_path, 'w', encoding='utf-8') as f:
@@ -282,6 +288,9 @@ Examples:
             except Exception as log_error:
                 if not args.quiet:
                     print(f"⚠️  Could not save workflow log: {log_error}")
+                    if args.debug:
+                        import traceback
+                        traceback.print_exc()
         elif not workflow_log and not args.quiet:
             print("ℹ️  No workflow log available")
         
@@ -303,6 +312,10 @@ Examples:
             print(f"\n❌ Result format error - missing key: {e}")
             print("\nThis might indicate an issue with the orchestration workflow.")
             print(f"Available result keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
+            if args.debug:
+                import traceback
+                print("\n🐛 Debug Information:")
+                traceback.print_exc()
         if args.no_exit:
             raise
         sys.exit(1)
@@ -310,6 +323,10 @@ Examples:
         if not args.quiet:
             print(f"\n❌ Type error during result processing: {e}")
             print(f"Result type: {type(result)}")
+            if args.debug:
+                import traceback
+                print("\n🐛 Debug Information:")
+                traceback.print_exc()
         if args.no_exit:
             raise
         sys.exit(1)
@@ -323,8 +340,8 @@ Examples:
             print("- Verify network connectivity")
             print("- Check the error message above for details")
             
-            # Debug information
-            if '--debug' in sys.argv or '-d' in sys.argv:
+            # Debug information (use parsed args.debug)
+            if args.debug:
                 import traceback
                 print("\n🐛 Debug Information:")
                 traceback.print_exc()
