@@ -128,9 +128,33 @@ class FileTools:
             return f"Error reading file {file_path}: {str(e)}"
     
     @staticmethod
-    def write_document(content: str, output_path: str, format: str = "md") -> str:
+    async def write_document_async(content: str, output_path: str, format: str = "md") -> str:
+        """Async write document to file using aiofiles.
+        
+        Args:
+            content: Document content
+            output_path: Output file path
+            format: Output format (md, txt)
+        
+        Returns:
+            Success message or error
         """
-        Write document to file
+        try:
+            output_file = Path(output_path)
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            async with aiofiles.open(output_file, 'w', encoding='utf-8') as f:
+                await f.write(content)
+            
+            return f"Document successfully written to {output_path}"
+        except Exception as e:
+            return f"Error writing document: {str(e)}"
+    
+    @staticmethod
+    def write_document(content: str, output_path: str, format: str = "md") -> str:
+        """Write document to file (synchronous version).
+        
+        For async operations, use write_document_async instead.
         
         Args:
             content: Document content
@@ -434,6 +458,28 @@ class DocumentFormatter:
             return f"Error converting to DOCX: {str(e)}"
     
     @staticmethod
+    async def save_as_docx_async(markdown_content: str, output_path: str) -> str:
+        """Async convert Markdown to DOCX format.
+        
+        This wraps the synchronous docx operations in asyncio.to_thread
+        for non-blocking I/O in async contexts.
+        
+        Args:
+            markdown_content: Markdown content
+            output_path: Output DOCX file path
+        
+        Returns:
+            Success message or error
+        """
+        # Run blocking docx operations in thread pool
+        import asyncio
+        return await asyncio.to_thread(
+            FileTools.save_as_docx,
+            markdown_content,
+            output_path
+        )
+    
+    @staticmethod
     def save_as_pdf(markdown_content: str, output_path: str) -> str:
         """Convert Markdown to PDF using WeasyPrint.
         
@@ -518,3 +564,25 @@ class DocumentFormatter:
         
         except Exception as e:
             return f"Error converting to PDF: {str(e)}"
+    
+    @staticmethod
+    async def save_as_pdf_async(markdown_content: str, output_path: str) -> str:
+        """Async convert Markdown to PDF using WeasyPrint.
+        
+        This wraps the synchronous PDF operations in asyncio.to_thread
+        for non-blocking I/O in async contexts.
+        
+        Args:
+            markdown_content: Markdown content
+            output_path: Output PDF file path
+        
+        Returns:
+            Success message or error
+        """
+        # Run blocking PDF operations in thread pool
+        import asyncio
+        return await asyncio.to_thread(
+            FileTools.save_as_pdf,
+            markdown_content,
+            output_path
+        )
