@@ -271,17 +271,25 @@ Examples:
                     f.write("WORKFLOW LOG\n")
                     f.write("=" * 70 + "\n\n")
                     for entry in workflow_log:
-                        f.write(f"Step: {entry.get('step', 'unknown')}\n")
-                        f.write(f"Time: {entry.get('timestamp', 'unknown')}\n")
-                        data = entry.get('data', {})
-                        # Truncate large data for log file
-                        if isinstance(data, dict):
-                            for key, value in data.items():
-                                value_str = str(value)[:500] if len(str(value)) > 500 else str(value)
-                                f.write(f"  {key}: {value_str}\n")
+                        # Handle both string entries and dict entries
+                        if isinstance(entry, str):
+                            f.write(f"{entry}\n")
+                            f.write("-" * 70 + "\n\n")
+                        elif isinstance(entry, dict):
+                            f.write(f"Step: {entry.get('step', 'unknown')}\n")
+                            f.write(f"Time: {entry.get('timestamp', 'unknown')}\n")
+                            data = entry.get('data', {})
+                            # Truncate large data for log file
+                            if isinstance(data, dict):
+                                for key, value in data.items():
+                                    value_str = str(value)[:500] if len(str(value)) > 500 else str(value)
+                                    f.write(f"  {key}: {value_str}\n")
+                            else:
+                                f.write(f"Data: {str(data)[:500]}\n")
+                            f.write("-" * 70 + "\n\n")
                         else:
-                            f.write(f"Data: {str(data)[:500]}\n")
-                        f.write("-" * 70 + "\n\n")
+                            f.write(f"{str(entry)}\n")
+                            f.write("-" * 70 + "\n\n")
                 
                 if not args.quiet:
                     print(f"📊 Workflow log saved to: {log_path}")

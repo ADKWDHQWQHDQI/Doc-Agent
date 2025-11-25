@@ -159,6 +159,7 @@ class BaseAgent:
             connected_agents = []
             
             agent_params = {
+                'name': self.name,  # CRITICAL: Set agent name for Azure AI Foundry visibility
                 'chat_client': self._chat_client,
                 'instructions': self.system_prompt
             }
@@ -183,7 +184,11 @@ class BaseAgent:
             except TypeError as te:
                 # SDK version mismatch - try minimal params
                 print(f"   ⚠️  ChatAgent parameter mismatch, using minimal config...")
+                if self._chat_client is None:
+                    print(f"   Chat client is not initialized")
+                    return False
                 self.agent = ChatAgent(
+                    name=self.name,  # Always include name
                     chat_client=self._chat_client,
                     instructions=self.system_prompt
                 )
