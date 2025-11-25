@@ -99,7 +99,7 @@ class BaseAgent:
             print(f"   Example: AZURE_AI_PROJECT_ENDPOINT=https://your-project.aiservices.azure.com")
             return False
         
-        # Check if agent already exists in registry
+        # Check if agent already exists in registry (in-memory cache)
         if self.name in BaseAgent._agent_registry:
             existing = BaseAgent._agent_registry[self.name]
             self.agent = existing['agent']
@@ -151,6 +151,39 @@ class BaseAgent:
                     BaseAgent._client_initialized = True
             else:
                 print(f"   ♻️  Reusing shared Azure AI Agent Client")
+            
+            # Use the shared client
+            self._chat_client = BaseAgent._shared_client
+            
+            # IMPORTANT: Check if agent already exists in Azure AI Foundry
+            # This prevents creating duplicate agents across different Python runs
+            try:
+                print(f"   🔍 Checking Azure AI Foundry for existing '{self.name}' agent...")
+                existing_agents = self._chat_client.agents.list()
+                
+                for existing_agent in existing_agents:
+                    agent_name = getattr(existing_agent, 'name', None)
+                    if agent_name == self.name:
+                        print(f"   ♻️  Found existing agent in Foundry: {self.name}")
+                        self.agent = existing_agent
+                        self.agent_id = getattr(existing_agent, 'agent_id', None) or getattr(existing_agent, 'id', None)
+                        
+                        # Store in registry for this session
+                        BaseAgent._agent_registry[self.name] = {
+                            'agent': self.agent,
+                            'chat_client': self._chat_client,
+                            'agent_id': self.agent_id
+                        }
+                        
+                        if self.agent_id:
+                            print(f"   🆔 Agent ID: {self.agent_id}")
+                        print(f"   ✅ Reusing: {self.name} (from Azure AI Foundry)")
+                        return True
+                
+                print(f"   ➕ No existing agent found, creating new one in Foundry...")
+            except Exception as list_error:
+                print(f"   ⚠️  Could not list existing agents: {list_error}")
+                print(f"   ➕ Proceeding with agent creation...")
             
             # Use the shared client
             self._chat_client = BaseAgent._shared_client
