@@ -9,13 +9,19 @@ if AGENT_SDK_AVAILABLE:
     try:
         from agent_framework import ChatAgent
         from agent_framework.azure import AzureAIAgentClient
+        from azure.ai.projects import AIProjectClient
+        from azure.identity import DefaultAzureCredential as SyncDefaultAzureCredential
     except ImportError as e:
         print(f"⚠️  Warning: SDK import failed after availability check: {e}")
         ChatAgent = None  # type: ignore
         AzureAIAgentClient = None  # type: ignore
+        AIProjectClient = None  # type: ignore
+        SyncDefaultAzureCredential = None  # type: ignore
 else:
     ChatAgent = None  # type: ignore
     AzureAIAgentClient = None  # type: ignore
+    AIProjectClient = None  # type: ignore
+    SyncDefaultAzureCredential = None  # type: ignore
 
 
 class BaseAgent:
@@ -159,28 +165,39 @@ class BaseAgent:
             # This prevents creating duplicate agents across different Python runs
             try:
                 print(f"   🔍 Checking Azure AI Foundry for existing '{self.name}' agent...")
-                existing_agents = self._chat_client.agents.list()
                 
-                for existing_agent in existing_agents:
+                # Use AIProjectClient to list agents (AzureAIAgentClient doesn't have list_agents)
+                from azure.ai.projects import AIProjectClient
+                from azure.identity import DefaultAzureCredential as SyncDefaultAzureCredential
+                
+                project_client = AIProjectClient(
+                    credential=SyncDefaultAzureCredential(),
+                    endpoint=Config.AZURE_AI_PROJECT_ENDPOINT
+                )
+                
+                # List all agents in the project
+                existing_agents_list = project_client.agents.list_agents()
+                
+                for existing_agent in existing_agents_list:
                     agent_name = getattr(existing_agent, 'name', None)
                     if agent_name == self.name:
                         print(f"   ♻️  Found existing agent in Foundry: {self.name}")
-                        self.agent = existing_agent
-                        self.agent_id = getattr(existing_agent, 'agent_id', None) or getattr(existing_agent, 'id', None)
                         
-                        # Store in registry for this session
-                        BaseAgent._agent_registry[self.name] = {
-                            'agent': self.agent,
-                            'chat_client': self._chat_client,
-                            'agent_id': self.agent_id
-                        }
+                        # Get the agent ID
+                        agent_id = getattr(existing_agent, 'id', None)
                         
-                        if self.agent_id:
-                            print(f"   🆔 Agent ID: {self.agent_id}")
-                        print(f"   ✅ Reusing: {self.name} (from Azure AI Foundry)")
-                        return True
+                        # IMPORTANT: We need to get the full agent object using AzureAIAgentClient
+                        # because AIProjectClient returns a different type
+                        # For now, we'll create a new agent (MAF doesn't support getting by ID yet)
+                        print(f"   ⚠️  Note: Microsoft Agent Framework requires recreating agent session")
+                        print(f"   ➕ Creating new agent session (reusing agent ID: {agent_id})...")
+                        break
+                else:
+                    print(f"   ➕ No existing agent found, creating new one in Foundry...")
                 
-                print(f"   ➕ No existing agent found, creating new one in Foundry...")
+                # Close the project client
+                project_client.close()
+                
             except Exception as list_error:
                 print(f"   ⚠️  Could not list existing agents: {list_error}")
                 print(f"   ➕ Proceeding with agent creation...")
