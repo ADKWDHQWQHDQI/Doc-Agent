@@ -163,10 +163,13 @@ class BaseAgent:
             
             # IMPORTANT: Check if agent already exists in Azure AI Foundry
             # This prevents creating duplicate agents across different Python runs
+            persistent_agent = None
+            persistent_agent_id = None
+            
             try:
                 print(f"   🔍 Checking Azure AI Foundry for existing '{self.name}' agent...")
                 
-                # Use AIProjectClient to list agents (AzureAIAgentClient doesn't have list_agents)
+                # Use AIProjectClient to list and manage persistent agents
                 from azure.ai.projects import AIProjectClient
                 from azure.identity import DefaultAzureCredential as SyncDefaultAzureCredential
                 
@@ -176,57 +179,68 @@ class BaseAgent:
                 )
                 
                 # List all agents in the project
-                existing_agents_list = project_client.agents.list_agents()
+                existing_agents_list = list(project_client.agents.list_agents())
                 
                 for existing_agent in existing_agents_list:
                     agent_name = getattr(existing_agent, 'name', None)
                     if agent_name == self.name:
-                        print(f"   ♻️  Found existing agent in Foundry: {self.name}")
-                        
-                        # Get the agent ID
-                        agent_id = getattr(existing_agent, 'id', None)
-                        
-                        # IMPORTANT: We need to get the full agent object using AzureAIAgentClient
-                        # because AIProjectClient returns a different type
-                        # For now, we'll create a new agent (MAF doesn't support getting by ID yet)
-                        print(f"   ⚠️  Note: Microsoft Agent Framework requires recreating agent session")
-                        print(f"   ➕ Creating new agent session (reusing agent ID: {agent_id})...")
+                        print(f"   ♻️  Found existing persistent agent in Foundry: {self.name}")
+                        persistent_agent = existing_agent
+                        persistent_agent_id = existing_agent.id
+                        print(f"   🆔 Persistent Agent ID: {persistent_agent_id}")
                         break
                 else:
-                    print(f"   ➕ No existing agent found, creating new one in Foundry...")
+                    # Create persistent agent in Azure AI Foundry
+                    print(f"   ➕ Creating new persistent agent in Foundry...")
+                    persistent_agent = project_client.agents.create_agent(
+                        model=self.model,
+                        name=self.name,
+                        instructions=self.system_prompt
+                    )
+                    persistent_agent_id = persistent_agent.id
+                    print(f"   🆔 Persistent Agent ID: {persistent_agent_id}")
+                    print(f"   ✅ Persistent agent created in Foundry")
                 
                 # Close the project client
                 project_client.close()
                 
             except Exception as list_error:
-                print(f"   ⚠️  Could not list existing agents: {list_error}")
-                print(f"   ➕ Proceeding with agent creation...")
+                print(f"   ⚠️  Could not manage persistent agents: {list_error}")
+                print(f"   ➕ Proceeding with ephemeral agent creation...")
             
             # Use the shared client
             self._chat_client = BaseAgent._shared_client
             
-            # Setup connected_agents for delegation (empty for now, will be linked later)
-            connected_agents = []
+            # Now create ChatAgent wrapper for Microsoft Agent Framework execution
+            # ChatAgent is used for running/executing the agent, while the persistent agent exists in Foundry
+            print(f"   🔄 Creating ChatAgent wrapper for execution...")
             
             agent_params = {
-                'name': self.name,  # CRITICAL: Set agent name for Azure AI Foundry visibility
+                'name': self.name,
                 'chat_client': self._chat_client,
                 'instructions': self.system_prompt
             }
+            
+            # If we have a persistent agent ID, try to pass it to ChatAgent
+            if persistent_agent_id:
+                try:
+                    agent_params['agent_id'] = persistent_agent_id
+                except (TypeError, AttributeError):
+                    pass  # agent_id not supported in this SDK version
             
             # Add tools if available (preview feature)
             if self.tools:
                 try:
                     agent_params['tools'] = self.tools
                 except (TypeError, AttributeError):
-                    print(f"   ⚠️  Tools not supported in this SDK version")
+                    pass
             
             # Add connected_agents for delegation graph (MAF preview feature)
             if hasattr(self, '_connected_agent_names'):
                 try:
                     agent_params['connected_agents'] = self._connected_agent_names
                 except (TypeError, AttributeError):
-                    print(f"   ⚠️  Connected agents not supported in this SDK version")
+                    pass
             
             # Initialize ChatAgent with error handling
             try:
@@ -238,22 +252,21 @@ class BaseAgent:
                     print(f"   Chat client is not initialized")
                     return False
                 self.agent = ChatAgent(
-                    name=self.name,  # Always include name
+                    name=self.name,
                     chat_client=self._chat_client,
                     instructions=self.system_prompt
                 )
             
-            # Store in registry to reuse
+            # Store in registry to reuse (both persistent agent ID and ChatAgent wrapper)
             BaseAgent._agent_registry[self.name] = {
                 'agent': self.agent,
                 'chat_client': self._chat_client,
-                'agent_id': getattr(self.agent, 'agent_id', None) or getattr(self.agent, 'id', None)
+                'agent_id': getattr(self.agent, 'agent_id', None) or getattr(self.agent, 'id', None),
+                'persistent_agent_id': persistent_agent_id  # Store the Foundry persistent ID
             }
             
-            # Store agent_id for delegation
-            self.agent_id = BaseAgent._agent_registry[self.name]['agent_id']
-            if self.agent_id:
-                print(f"   🆔 Agent ID: {self.agent_id}")
+            # Store agent_id for delegation (prefer persistent ID)
+            self.agent_id = persistent_agent_id or BaseAgent._agent_registry[self.name]['agent_id']
             
             print(f"   ✅ Registered: {self.name}")
             return True
